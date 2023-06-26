@@ -16,26 +16,16 @@
  *
  */
 
-// Package tests_test contains test cases for the xDS LB Policy Registry.
-package tests_test
+// Package xdslbregistry_test contains test cases for the xDS LB Policy Registry.
+package xdslbregistry_test
 
 import (
 	"encoding/json"
 	"strings"
 	"testing"
 
-	v1xdsudpatypepb "github.com/cncf/xds/go/udpa/type/v1"
-	v3xdsxdstypepb "github.com/cncf/xds/go/xds/type/v3"
-	v3clusterpb "github.com/envoyproxy/go-control-plane/envoy/config/cluster/v3"
-	v3corepb "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
-	v3leastrequestpb "github.com/envoyproxy/go-control-plane/envoy/extensions/load_balancing_policies/least_request/v3"
-	v3ringhashpb "github.com/envoyproxy/go-control-plane/envoy/extensions/load_balancing_policies/ring_hash/v3"
-	v3roundrobinpb "github.com/envoyproxy/go-control-plane/envoy/extensions/load_balancing_policies/round_robin/v3"
-	v3wrrlocalitypb "github.com/envoyproxy/go-control-plane/envoy/extensions/load_balancing_policies/wrr_locality/v3"
 	"github.com/golang/protobuf/proto"
-	structpb "github.com/golang/protobuf/ptypes/struct"
 	"github.com/google/go-cmp/cmp"
-
 	_ "google.golang.org/grpc/balancer/roundrobin"
 	"google.golang.org/grpc/internal/balancer/stub"
 	"google.golang.org/grpc/internal/envconfig"
@@ -43,12 +33,22 @@ import (
 	"google.golang.org/grpc/internal/pretty"
 	internalserviceconfig "google.golang.org/grpc/internal/serviceconfig"
 	"google.golang.org/grpc/internal/testutils"
-	"google.golang.org/grpc/serviceconfig"
-	"google.golang.org/grpc/xds/internal/balancer/ringhash"
+	_ "google.golang.org/grpc/xds" // Register the xDS LB Registry Converters.
 	"google.golang.org/grpc/xds/internal/balancer/wrrlocality"
 	"google.golang.org/grpc/xds/internal/xdsclient/xdslbregistry"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/wrapperspb"
+
+	v1xdsudpatypepb "github.com/cncf/xds/go/udpa/type/v1"
+	v3xdsxdstypepb "github.com/cncf/xds/go/xds/type/v3"
+	v3clusterpb "github.com/envoyproxy/go-control-plane/envoy/config/cluster/v3"
+	v3corepb "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
+	v3leastrequestpb "github.com/envoyproxy/go-control-plane/envoy/extensions/load_balancing_policies/least_request/v3"
+	v3pickfirstpb "github.com/envoyproxy/go-control-plane/envoy/extensions/load_balancing_policies/pick_first/v3"
+	v3ringhashpb "github.com/envoyproxy/go-control-plane/envoy/extensions/load_balancing_policies/ring_hash/v3"
+	v3roundrobinpb "github.com/envoyproxy/go-control-plane/envoy/extensions/load_balancing_policies/round_robin/v3"
+	v3wrrlocalitypb "github.com/envoyproxy/go-control-plane/envoy/extensions/load_balancing_policies/wrr_locality/v3"
+	structpb "github.com/golang/protobuf/ptypes/struct"
 )
 
 type s struct {
@@ -59,25 +59,25 @@ func Test(t *testing.T) {
 	grpctest.RunSubTests(t, s{})
 }
 
-type customLBConfig struct {
-	serviceconfig.LoadBalancingConfig
+func wrrLocalityBalancerConfig(childPolicy *internalserviceconfig.BalancerConfig) *internalserviceconfig.BalancerConfig {
+	return &internalserviceconfig.BalancerConfig{
+		Name: wrrlocality.Name,
+		Config: &wrrlocality.LBConfig{
+			ChildPolicy: childPolicy,
+		},
+	}
 }
 
-// We have these tests in a separate test package in order to not take a
-// dependency on the internal xDS balancer packages within the xDS Client.
 func (s) TestConvertToServiceConfigSuccess(t *testing.T) {
 	const customLBPolicyName = "myorg.MyCustomLeastRequestPolicy"
-	stub.Register(customLBPolicyName, stub.BalancerFuncs{
-		ParseConfig: func(json.RawMessage) (serviceconfig.LoadBalancingConfig, error) {
-			return customLBConfig{}, nil
-		},
-	})
+	stub.Register(customLBPolicyName, stub.BalancerFuncs{})
 
 	tests := []struct {
 		name       string
 		policy     *v3clusterpb.LoadBalancingPolicy
-		wantConfig *internalserviceconfig.BalancerConfig
+		wantConfig string // JSON config
 		rhDisabled bool
+		pfDisabled bool
 	}{
 		{
 			name: "ring_hash",
@@ -94,13 +94,35 @@ func (s) TestConvertToServiceConfigSuccess(t *testing.T) {
 					},
 				},
 			},
-			wantConfig: &internalserviceconfig.BalancerConfig{
-				Name: "ring_hash_experimental",
-				Config: &ringhash.LBConfig{
-					MinRingSize: 10,
-					MaxRingSize: 100,
+			wantConfig: `[{"ring_hash_experimental": { "minRingSize": 10, "maxRingSize": 100 }}]`,
+		},
+		{
+			name: "pick_first_shuffle",
+			policy: &v3clusterpb.LoadBalancingPolicy{
+				Policies: []*v3clusterpb.LoadBalancingPolicy_Policy{
+					{
+						TypedExtensionConfig: &v3corepb.TypedExtensionConfig{
+							TypedConfig: testutils.MarshalAny(&v3pickfirstpb.PickFirst{
+								ShuffleAddressList: true,
+							}),
+						},
+					},
 				},
 			},
+			wantConfig: `[{"pick_first": { "shuffleAddressList": true }}]`,
+		},
+		{
+			name: "pick_first",
+			policy: &v3clusterpb.LoadBalancingPolicy{
+				Policies: []*v3clusterpb.LoadBalancingPolicy_Policy{
+					{
+						TypedExtensionConfig: &v3corepb.TypedExtensionConfig{
+							TypedConfig: testutils.MarshalAny(&v3pickfirstpb.PickFirst{}),
+						},
+					},
+				},
+			},
+			wantConfig: `[{"pick_first": { "shuffleAddressList": false }}]`,
 		},
 		{
 			name: "round_robin",
@@ -113,9 +135,7 @@ func (s) TestConvertToServiceConfigSuccess(t *testing.T) {
 					},
 				},
 			},
-			wantConfig: &internalserviceconfig.BalancerConfig{
-				Name: "round_robin",
-			},
+			wantConfig: `[{"round_robin": {}}]`,
 		},
 		{
 			name: "round_robin_ring_hash_use_first_supported",
@@ -137,9 +157,7 @@ func (s) TestConvertToServiceConfigSuccess(t *testing.T) {
 					},
 				},
 			},
-			wantConfig: &internalserviceconfig.BalancerConfig{
-				Name: "round_robin",
-			},
+			wantConfig: `[{"round_robin": {}}]`,
 		},
 		{
 			name: "ring_hash_disabled_rh_rr_use_first_supported",
@@ -161,10 +179,29 @@ func (s) TestConvertToServiceConfigSuccess(t *testing.T) {
 					},
 				},
 			},
-			wantConfig: &internalserviceconfig.BalancerConfig{
-				Name: "round_robin",
-			},
+			wantConfig: `[{"round_robin": {}}]`,
 			rhDisabled: true,
+		},
+		{
+			name: "pick_first_disabled_pf_rr_use_first_supported",
+			policy: &v3clusterpb.LoadBalancingPolicy{
+				Policies: []*v3clusterpb.LoadBalancingPolicy_Policy{
+					{
+						TypedExtensionConfig: &v3corepb.TypedExtensionConfig{
+							TypedConfig: testutils.MarshalAny(&v3pickfirstpb.PickFirst{
+								ShuffleAddressList: true,
+							}),
+						},
+					},
+					{
+						TypedExtensionConfig: &v3corepb.TypedExtensionConfig{
+							TypedConfig: testutils.MarshalAny(&v3roundrobinpb.RoundRobin{}),
+						},
+					},
+				},
+			},
+			wantConfig: `[{"round_robin": {}}]`,
+			pfDisabled: true,
 		},
 		{
 			name: "custom_lb_type_v3_struct",
@@ -190,10 +227,7 @@ func (s) TestConvertToServiceConfigSuccess(t *testing.T) {
 					},
 				},
 			},
-			wantConfig: &internalserviceconfig.BalancerConfig{
-				Name:   "myorg.MyCustomLeastRequestPolicy",
-				Config: customLBConfig{},
-			},
+			wantConfig: `[{"myorg.MyCustomLeastRequestPolicy": {}}]`,
 		},
 		{
 			name: "custom_lb_type_v1_struct",
@@ -209,10 +243,7 @@ func (s) TestConvertToServiceConfigSuccess(t *testing.T) {
 					},
 				},
 			},
-			wantConfig: &internalserviceconfig.BalancerConfig{
-				Name:   "myorg.MyCustomLeastRequestPolicy",
-				Config: customLBConfig{},
-			},
+			wantConfig: `[{"myorg.MyCustomLeastRequestPolicy": {}}]`,
 		},
 		{
 			name: "wrr_locality_child_round_robin",
@@ -225,14 +256,7 @@ func (s) TestConvertToServiceConfigSuccess(t *testing.T) {
 					},
 				},
 			},
-			wantConfig: &internalserviceconfig.BalancerConfig{
-				Name: wrrlocality.Name,
-				Config: &wrrlocality.LBConfig{
-					ChildPolicy: &internalserviceconfig.BalancerConfig{
-						Name: "round_robin",
-					},
-				},
-			},
+			wantConfig: `[{"xds_wrr_locality_experimental": { "childPolicy": [{"round_robin": {}}] }}]`,
 		},
 		{
 			name: "wrr_locality_child_custom_lb_type_v3_struct",
@@ -248,55 +272,63 @@ func (s) TestConvertToServiceConfigSuccess(t *testing.T) {
 					},
 				},
 			},
-			wantConfig: &internalserviceconfig.BalancerConfig{
-				Name: wrrlocality.Name,
-				Config: &wrrlocality.LBConfig{
-					ChildPolicy: &internalserviceconfig.BalancerConfig{
-						Name:   "myorg.MyCustomLeastRequestPolicy",
-						Config: customLBConfig{},
+			wantConfig: `[{"xds_wrr_locality_experimental": { "childPolicy": [{"myorg.MyCustomLeastRequestPolicy": {}}] }}]`,
+		},
+		{
+			name: "on-the-boundary-of-recursive-limit",
+			policy: &v3clusterpb.LoadBalancingPolicy{
+				Policies: []*v3clusterpb.LoadBalancingPolicy_Policy{
+					{
+						TypedExtensionConfig: &v3corepb.TypedExtensionConfig{
+							TypedConfig: wrrLocalityAny(wrrLocality(wrrLocality(wrrLocality(wrrLocality(wrrLocality(wrrLocality(wrrLocality(wrrLocality(wrrLocality(wrrLocality(wrrLocality(wrrLocality(wrrLocality(wrrLocality(&v3roundrobinpb.RoundRobin{}))))))))))))))),
+						},
 					},
 				},
 			},
+			wantConfig: jsonMarshal(t, wrrLocalityBalancerConfig(wrrLocalityBalancerConfig(wrrLocalityBalancerConfig(wrrLocalityBalancerConfig(wrrLocalityBalancerConfig(wrrLocalityBalancerConfig(wrrLocalityBalancerConfig(wrrLocalityBalancerConfig(wrrLocalityBalancerConfig(wrrLocalityBalancerConfig(wrrLocalityBalancerConfig(wrrLocalityBalancerConfig(wrrLocalityBalancerConfig(wrrLocalityBalancerConfig(wrrLocalityBalancerConfig(&internalserviceconfig.BalancerConfig{
+				Name: "round_robin",
+			})))))))))))))))),
 		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			if test.rhDisabled {
-				oldRingHashSupport := envconfig.XDSRingHash
+				defer func(old bool) { envconfig.XDSRingHash = old }(envconfig.XDSRingHash)
 				envconfig.XDSRingHash = false
-				defer func() {
-					envconfig.XDSRingHash = oldRingHashSupport
-				}()
 			}
-			rawJSON, err := xdslbregistry.ConvertToServiceConfig(test.policy)
+			if !test.pfDisabled {
+				defer func(old bool) { envconfig.PickFirstLBConfig = old }(envconfig.PickFirstLBConfig)
+				envconfig.PickFirstLBConfig = true
+			}
+			rawJSON, err := xdslbregistry.ConvertToServiceConfig(test.policy, 0)
 			if err != nil {
 				t.Fatalf("ConvertToServiceConfig(%s) failed: %v", pretty.ToJSON(test.policy), err)
 			}
-			bc := &internalserviceconfig.BalancerConfig{}
-			// The converter registry is not guaranteed to emit json that is
-			// valid. It's scope is to simply convert from a proto message to
-			// internal gRPC JSON format. Thus, the tests cause valid JSON to
-			// eventually be emitted from ConvertToServiceConfig(), but this
-			// leaves this test brittle over time in case balancer validations
-			// change over time and add more failure cases. The simplicity of
-			// using this type (to get rid of non determinism in JSON strings)
-			// outweighs this brittleness, and also there are plans on
-			// decoupling the unmarshalling and validation step both present in
-			// this function in the future. In the future if balancer
-			// validations change, any configurations in this test that become
-			// invalid will need to be fixed. (need to make sure emissions above
-			// are valid configuration). Also, once this Unmarshal call is
-			// partitioned into Unmarshal vs. Validation in separate operations,
-			// the brittleness of this test will go away.
-			if err := json.Unmarshal(rawJSON, bc); err != nil {
-				t.Fatalf("failed to unmarshal JSON: %v", err)
+			// got and want must be unmarshalled since JSON strings shouldn't
+			// generally be directly compared.
+			var got []map[string]interface{}
+			if err := json.Unmarshal(rawJSON, &got); err != nil {
+				t.Fatalf("Error unmarshalling rawJSON (%q): %v", rawJSON, err)
 			}
-			if diff := cmp.Diff(bc, test.wantConfig); diff != "" {
+			var want []map[string]interface{}
+			if err := json.Unmarshal(json.RawMessage(test.wantConfig), &want); err != nil {
+				t.Fatalf("Error unmarshalling wantConfig (%q): %v", test.wantConfig, err)
+			}
+			if diff := cmp.Diff(got, want); diff != "" {
 				t.Fatalf("ConvertToServiceConfig() got unexpected output, diff (-got +want): %v", diff)
 			}
 		})
 	}
+}
+
+func jsonMarshal(t *testing.T, x interface{}) string {
+	t.Helper()
+	js, err := json.Marshal(x)
+	if err != nil {
+		t.Fatalf("Error marshalling to JSON (%+v): %v", x, err)
+	}
+	return string(js)
 }
 
 // TestConvertToServiceConfigFailure tests failure cases of the xDS LB registry
@@ -347,15 +379,13 @@ func (s) TestConvertToServiceConfigFailure(t *testing.T) {
 			},
 			wantErr: "no supported policy found in policy list",
 		},
-		// TODO: test validity right on the boundary of recursion 16 layers
-		// total.
 		{
-			name: "too much recursion",
+			name: "exceeds-boundary-of-recursive-limit-by-1",
 			policy: &v3clusterpb.LoadBalancingPolicy{
 				Policies: []*v3clusterpb.LoadBalancingPolicy_Policy{
 					{
 						TypedExtensionConfig: &v3corepb.TypedExtensionConfig{
-							TypedConfig: wrrLocalityAny(wrrLocality(wrrLocality(wrrLocality(wrrLocality(wrrLocality(wrrLocality(wrrLocality(wrrLocality(wrrLocality(wrrLocality(wrrLocality(wrrLocality(wrrLocality(wrrLocality(wrrLocality(wrrLocality(wrrLocality(wrrLocality(wrrLocality(wrrLocality(wrrLocality(wrrLocality(&v3roundrobinpb.RoundRobin{}))))))))))))))))))))))),
+							TypedConfig: wrrLocalityAny(wrrLocality(wrrLocality(wrrLocality(wrrLocality(wrrLocality(wrrLocality(wrrLocality(wrrLocality(wrrLocality(wrrLocality(wrrLocality(wrrLocality(wrrLocality(wrrLocality(wrrLocality(&v3roundrobinpb.RoundRobin{})))))))))))))))),
 						},
 					},
 				},
@@ -366,7 +396,7 @@ func (s) TestConvertToServiceConfigFailure(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			_, gotErr := xdslbregistry.ConvertToServiceConfig(test.policy)
+			_, gotErr := xdslbregistry.ConvertToServiceConfig(test.policy, 0)
 			// Test the error substring to test the different root causes of
 			// errors. This is more brittle over time, but it's important to
 			// test the root cause of the errors emitted from the
