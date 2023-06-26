@@ -101,9 +101,9 @@ func main() {
 		  "loadBalancingConfig": [
 			{
 			  "outlier_detection_experimental": {
-				"interval": 10000000000,
-				"baseEjectionTime": 30000000000,
-				"maxEjectionTime": 300000000000,
+				"interval": "10s",
+				"baseEjectionTime": "30s",
+				"maxEjectionTime": "300s",
 				"maxEjectionPercent": 10,
 				"successRateEjection": {
 					"stdevFactor": 1500,
