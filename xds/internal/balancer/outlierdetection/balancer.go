@@ -819,6 +819,7 @@ func (b *outlierDetectionBalancer) successRateAlgorithm() {
 		return
 	}
 	mean, stddev := b.meanAndStdDev(addrsToConsider)
+	channelz.Infof(logger, b.channelzParentID, "The mean is: %f and stddev is: %f", mean, stddev)
 	for _, addrInfo := range addrsToConsider {
 		bucket := addrInfo.callCounter.inactiveBucket
 		ejectionCfg := b.cfg.SuccessRateEjection

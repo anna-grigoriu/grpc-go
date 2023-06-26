@@ -40,7 +40,7 @@ const (
 var addrs = []string{"localhost:50051", "localhost:50052", "localhost:50053", "localhost:50054"}
 
 func callUnaryEcho(c ecpb.EchoClient, message string) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	r, err := c.UnaryEcho(ctx, &ecpb.EchoRequest{Message: message})
 	if err != nil {
@@ -52,17 +52,44 @@ func callUnaryEcho(c ecpb.EchoClient, message string) (string, error) {
 }
 
 func makeRPCs(cc *grpc.ClientConn, n int) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
 	hwc := ecpb.NewEchoClient(cc)
 	done := false
+	successes := map[string]int{}
+	failures := 0
 	ch := time.After(time.Minute)
 	for !done {
 		select {
 		case <-ch:
 			done = true
-		case <-time.After(time.Second):
-			callUnaryEcho(hwc, "this is examples/load_balancing")
+		case <-time.After(500 * time.Millisecond):
+			message, err := callUnaryEcho(hwc, "this is examples/load_balancing")
+			if err != nil {
+				failures++
+			} else {
+				successes[message]++
+			}
 		}
 	}
+	log.Printf("In the first minute, we had %d failures and %d healthy servers", failures, len(successes))
+	done = false
+	successes = map[string]int{}
+	failures = 0
+	for !done {
+		select {
+		case <-ctx.Done():
+			done = true
+		case <-time.After(500 * time.Millisecond):
+			message, err := callUnaryEcho(hwc, "this is examples/load_balancing")
+			if err != nil {
+				failures++
+			} else {
+				successes[message]++
+			}
+		}
+	}
+	log.Printf("In the second minute, we had %d failures and %d healthy servers", failures, len(successes))
 }
 
 func main() {
@@ -74,15 +101,15 @@ func main() {
 		  "loadBalancingConfig": [
 			{
 			  "outlier_detection_experimental": {
-				"interval": 10,
-				"baseEjectionTime": 10,
-				"maxEjectionTime": 300,
-				"maxEjectionPercent": 33,
-				"failurePercentageEjection": {
-					"threshold": 1,
+				"interval": 10000000000,
+				"baseEjectionTime": 30000000000,
+				"maxEjectionTime": 300000000000,
+				"maxEjectionPercent": 10,
+				"successRateEjection": {
+					"stdevFactor": 1500,
 					"enforcementPercentage": 100,
-					"minimumHosts": 2,
-					"requestVolume": 1
+					"minimumHosts": 3,
+					"requestVolume": 5
 				},
 				"childPolicy": [{"round_robin": {}}]
 			  }

@@ -33,7 +33,7 @@ import (
 )
 
 var (
-	addrs = map[string]bool{":50051": false, ":50052": false, ":50053": true, ":50054": false}
+	addrs = map[string]bool{":50051": true, ":50052": false, ":50053": false, ":50054": false}
 )
 
 type ecServer struct {
