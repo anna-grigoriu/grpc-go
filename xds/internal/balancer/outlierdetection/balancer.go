@@ -225,11 +225,12 @@ func (b *outlierDetectionBalancer) noopConfig() bool {
 // Caller must hold b.mu.
 func (b *outlierDetectionBalancer) onIntervalConfig() {
 	var interval time.Duration
+	channelz.Infof(logger, b.channelzParentID, "Hi this is Anna")
 	// our issue might be somewhere here in all honesty
 	if b.timerStartTime.IsZero() {
 		b.timerStartTime = time.Now()
+		channelz.Infof(logger, b.channelzParentID, "Clearing all callCounter data.")
 		for _, addrInfo := range b.addrs {
-			channelz.Infof(logger, b.channelzParentID, "Clearing all callCounter data.")
 			addrInfo.callCounter.clear()
 		}
 		interval = time.Duration(b.cfg.Interval)
