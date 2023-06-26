@@ -229,7 +229,7 @@ func (b *outlierDetectionBalancer) onIntervalConfig() {
 	if b.timerStartTime.IsZero() {
 		b.timerStartTime = time.Now()
 		for _, addrInfo := range b.addrs {
-			b.logger.Infof("Clearing all call counter data.")
+			channelz.Infof(logger, b.channelzParentID, "Clearing all callCounter data.")
 			addrInfo.callCounter.clear()
 		}
 		interval = time.Duration(b.cfg.Interval)
