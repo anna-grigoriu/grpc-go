@@ -828,6 +828,7 @@ func (b *outlierDetectionBalancer) successRateAlgorithm() {
 	if len(addrsToConsider) < int(b.cfg.SuccessRateEjection.MinimumHosts) {
 		return
 	}
+	channelz.Infof(logger, b.channelzParentID, "Addrs to consider: %#v", addrsToConsider)
 	mean, stddev := b.meanAndStdDev(addrsToConsider)
 	for _, addrInfo := range addrsToConsider {
 		bucket := addrInfo.callCounter.inactiveBucket
