@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2020 gRPC authors.
+ * Copyright 2023 gRPC authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,25 +16,33 @@
  *
  */
 
-package xdsclient
+package grpc
 
-import (
-	"fmt"
+import "testing"
 
-	"google.golang.org/grpc/grpclog"
-	internalgrpclog "google.golang.org/grpc/internal/grpclog"
-)
+func (s) TestSharedBufferPool(t *testing.T) {
+	pools := []SharedBufferPool{
+		nopBufferPool{},
+		NewSharedBufferPool(),
+	}
 
-var logger = grpclog.Component("xds")
+	lengths := []int{
+		level4PoolMaxSize + 1,
+		level4PoolMaxSize,
+		level3PoolMaxSize,
+		level2PoolMaxSize,
+		level1PoolMaxSize,
+		level0PoolMaxSize,
+	}
 
-func prefixLogger(p *clientImpl) *internalgrpclog.PrefixLogger {
-	return internalgrpclog.NewPrefixLogger(logger, clientPrefix(p))
-}
+	for _, p := range pools {
+		for _, l := range lengths {
+			bs := p.Get(l)
+			if len(bs) != l {
+				t.Fatalf("Expected buffer of length %d, got %d", l, len(bs))
+			}
 
-func clientPrefix(p *clientImpl) string {
-	return fmt.Sprintf("[xds-client %p] ", p)
-}
-
-func authorityPrefix(p *clientImpl, serverURI string) string {
-	return fmt.Sprintf("%s[%s] ", clientPrefix(p), serverURI)
+			p.Put(&bs)
+		}
+	}
 }
