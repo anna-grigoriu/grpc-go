@@ -824,8 +824,10 @@ func (b *outlierDetectionBalancer) meanAndStdDev(addrs []*addressInfo) (float64,
 //
 // Caller must hold b.mu.
 func (b *outlierDetectionBalancer) successRateAlgorithm() {
+	channelz.Infof(logger, b.channelzParentID, "SuccessRate algorithm is called here!")
 	addrsToConsider := b.addrsWithAtLeastRequestVolume(b.cfg.SuccessRateEjection.RequestVolume)
 	if len(addrsToConsider) < int(b.cfg.SuccessRateEjection.MinimumHosts) {
+		channelz.Infof(logger, b.channelzParentID, "SuccessRate algorithm: NOT ENOUGH HOSTS")
 		return
 	}
 	channelz.Infof(logger, b.channelzParentID, "Addrs to consider: %#v", addrsToConsider)
@@ -834,6 +836,7 @@ func (b *outlierDetectionBalancer) successRateAlgorithm() {
 		bucket := addrInfo.callCounter.inactiveBucket
 		ejectionCfg := b.cfg.SuccessRateEjection
 		if float64(b.numAddrsEjected)/float64(len(b.addrs))*100 >= float64(b.cfg.MaxEjectionPercent) {
+			channelz.Infof(logger, b.channelzParentID, "SuccessRate algorithm: MAX EJECTION PERCENT HAS BEEN SURPASSED")
 			return
 		}
 		successRate := float64(bucket.numSuccesses) / float64(bucket.numSuccesses+bucket.numFailures)
@@ -845,6 +848,7 @@ func (b *outlierDetectionBalancer) successRateAlgorithm() {
 				b.ejectAddress(addrInfo)
 			}
 		}
+		channelz.Infof(logger, b.channelzParentID, "SuccessRate algorithm: NO OUTLIER DETECTED")
 	}
 }
 

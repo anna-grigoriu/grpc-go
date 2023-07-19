@@ -24,6 +24,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math/rand"
 	"net"
 	"sync"
 
@@ -33,31 +34,31 @@ import (
 )
 
 var (
-	addrs = map[string]bool{":50051": false, ":50052": false, ":50053": true, ":50054": false}
+	addrs = map[string]int{":50050": 100, ":50051": 100, ":50052": 100, ":50053": 100, ":50054": 100, ":50055": 100, ":50056": 0, ":50057": 90}
 )
 
 type ecServer struct {
 	pb.UnimplementedEchoServer
-	addr      string
-	maybeFail bool
+	addr        string
+	successRate int
 }
 
 func (s *ecServer) UnaryEcho(ctx context.Context, req *pb.EchoRequest) (*pb.EchoResponse, error) {
-	if s.maybeFail {
+	if rand.Intn(100) > s.successRate {
 		return nil, errors.New("failing on purpose")
 	} else {
 		return &pb.EchoResponse{Message: fmt.Sprintf("%s (from %s)", req.Message, s.addr)}, nil
 	}
 }
 
-func startServer(port string, fails bool) {
+func startServer(port string, successRate int) {
 	lis, err := net.Listen("tcp", port)
 	if err != nil {
 		log.Fatalf("failed to listen: %v", err)
 	}
 	s := grpc.NewServer()
-	pb.RegisterEchoServer(s, &ecServer{addr: port, maybeFail: fails})
-	log.Printf("serving on %s with failures %t\n", port, fails)
+	pb.RegisterEchoServer(s, &ecServer{addr: port, successRate: successRate})
+	log.Printf("serving on %s with failures %t\n", port, successRate)
 	if err := s.Serve(lis); err != nil {
 		log.Fatalf("failed to serve: %v", err)
 	}
@@ -65,12 +66,12 @@ func startServer(port string, fails bool) {
 
 func main() {
 	var wg sync.WaitGroup
-	for port, fails := range addrs {
+	for port, successRate := range addrs {
 		wg.Add(1)
-		go func(port string, fails bool) {
+		go func(port string, successRate int) {
 			defer wg.Done()
-			startServer(port, fails)
-		}(port, fails)
+			startServer(port, successRate)
+		}(port, successRate)
 	}
 	wg.Wait()
 }

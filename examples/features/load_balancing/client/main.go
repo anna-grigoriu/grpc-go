@@ -37,7 +37,7 @@ const (
 	exampleServiceName = "lb.example.grpc.io"
 )
 
-var addrs = []string{"localhost:50051", "localhost:50052", "localhost:50053", "localhost:50054"}
+var addrs = []string{"localhost:50050", "localhost:50051", "localhost:50052", "localhost:50053", "localhost:50054", "localhost:50055", "localhost:50056", "localhost:50057"}
 
 func callUnaryEcho(c ecpb.EchoClient, message string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
@@ -54,12 +54,12 @@ func callUnaryEcho(c ecpb.EchoClient, message string) (string, error) {
 func makeRPCs(cc *grpc.ClientConn, n int) {
 	hwc := ecpb.NewEchoClient(cc)
 	done := false
-	ch := time.After(time.Minute)
+	ch := time.After(5 * time.Minute)
 	for !done {
 		select {
 		case <-ch:
 			done = true
-		case <-time.After(time.Second):
+		case <-time.After(100 * time.Millisecond):
 			callUnaryEcho(hwc, "this is examples/load_balancing")
 		}
 	}
@@ -74,15 +74,21 @@ func main() {
 		  "loadBalancingConfig": [
 			{
 			  "outlier_detection_experimental": {
-				"interval": 10,
-				"baseEjectionTime": 10,
-				"maxEjectionTime": 300,
-				"maxEjectionPercent": 33,
+				"interval": "10s",
+				"baseEjectionTime": "30s",
+				"maxEjectionTime": "300s",
+				"maxEjectionPercent": 30,
 				"failurePercentageEjection": {
-					"threshold": 1,
+					"threshold": 85,
 					"enforcementPercentage": 100,
-					"minimumHosts": 2,
-					"requestVolume": 1
+					"minimumHosts": 3,
+					"requestVolume": 5
+				},
+				"successRateEjection": {
+					"stdevFactor" : 1900,
+					"enforcementPercentage": 100,
+					"minimumHosts" : 6,
+					"requestVolume": 5
 				},
 				"childPolicy": [{"round_robin": {}}]
 			  }
