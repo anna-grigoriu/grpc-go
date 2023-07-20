@@ -243,7 +243,6 @@ func (b *outlierDetectionBalancer) onIntervalConfig() {
 		channelz.Infof(logger, b.channelzParentID, "onIntervalConfig: restarting balancer interval timer with currentTime=%s", currentTime)
 		interval = time.Duration(b.cfg.Interval) - currentTime
 		channelz.Infof(logger, b.channelzParentID, "onIntervalConfig: restarting balancer interval timer with interval=%s", interval)
-		channelz.Infof(logger, b.channelzParentID, "onIntervalConfig: restarting balancer interval timer with total duration=%s", currentTime+interval)
 		if interval < 0 {
 			interval = 0
 		}
