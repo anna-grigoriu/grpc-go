@@ -51,6 +51,10 @@ var (
 	now       = time.Now
 )
 
+var (
+	currentTimeAtStop time.Duration
+)
+
 // Name is the name of the outlier detection balancer.
 const Name = "outlier_detection_experimental"
 
@@ -235,6 +239,7 @@ func (b *outlierDetectionBalancer) onIntervalConfig() {
 		interval = time.Duration(b.cfg.Interval)
 	} else {
 		currentTime := now().Sub(b.timerStartTime)
+		channelz.Infof(logger, b.channelzParentID, "onIntervalConfig: restarting balancer interval timer with difference between timers=%s", currentTime-currentTimeAtStop)
 		channelz.Infof(logger, b.channelzParentID, "onIntervalConfig: restarting balancer interval timer with currentTime=%s", currentTime)
 		interval = time.Duration(b.cfg.Interval) - currentTime
 		channelz.Infof(logger, b.channelzParentID, "onIntervalConfig: restarting balancer interval timer with interval=%s", interval)
@@ -318,8 +323,8 @@ func (b *outlierDetectionBalancer) UpdateClientConnState(s balancer.ClientConnSt
 	}
 
 	if b.intervalTimer != nil {
-		currentTime := now().Sub(b.timerStartTime)
-		channelz.Infof(logger, b.channelzParentID, "UpdateClientConnState: stopping balancer at currentTime=%s", currentTime)
+		currentTimeAtStop = now().Sub(b.timerStartTime)
+		channelz.Infof(logger, b.channelzParentID, "UpdateClientConnState: stopping balancer at currentTime=%s", currentTimeAtStop)
 		channelz.Infof(logger, b.channelzParentID, "UpdateClientConnState: stopping balancer intervalTimer.")
 		b.intervalTimer.Stop()
 	}
