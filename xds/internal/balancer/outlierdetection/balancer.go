@@ -225,14 +225,17 @@ func (b *outlierDetectionBalancer) noopConfig() bool {
 // Caller must hold b.mu.
 func (b *outlierDetectionBalancer) onIntervalConfig() {
 	var interval time.Duration
+	channelz.Infof(logger, b.channelzParentID, "New interval starts here!")
 	if b.timerStartTime.IsZero() {
 		b.timerStartTime = time.Now()
+		channelz.Infof(logger, b.channelzParentID, "Clearing all callCounter data.")
 		for _, addrInfo := range b.addrs {
 			addrInfo.callCounter.clear()
 		}
 		interval = time.Duration(b.cfg.Interval)
 	} else {
 		interval = time.Duration(b.cfg.Interval) - now().Sub(b.timerStartTime)
+		channelz.Infof(logger, b.channelzParentID, "onIntervalConfig: restarting balancer interval timer with interval=%#v", interval)
 		if interval < 0 {
 			interval = 0
 		}
@@ -312,6 +315,7 @@ func (b *outlierDetectionBalancer) UpdateClientConnState(s balancer.ClientConnSt
 	}
 
 	if b.intervalTimer != nil {
+		channelz.Infof(logger, b.channelzParentID, "UpdateClientConnState: stopping balancer intervalTimer.")
 		b.intervalTimer.Stop()
 	}
 
@@ -823,22 +827,28 @@ func (b *outlierDetectionBalancer) meanAndStdDev(addrs []*addressInfo) (float64,
 func (b *outlierDetectionBalancer) successRateAlgorithm() {
 	addrsToConsider := b.addrsWithAtLeastRequestVolume(b.cfg.SuccessRateEjection.RequestVolume)
 	if len(addrsToConsider) < int(b.cfg.SuccessRateEjection.MinimumHosts) {
+		channelz.Infof(logger, b.channelzParentID, "Success Rate Algorithm: MinimumHosts not reached.")
 		return
 	}
+	channelz.Infof(logger, b.channelzParentID, "Addrs to consider: %#v", addrsToConsider)
 	mean, stddev := b.meanAndStdDev(addrsToConsider)
 	for _, addrInfo := range addrsToConsider {
 		bucket := addrInfo.callCounter.inactiveBucket
 		ejectionCfg := b.cfg.SuccessRateEjection
 		if float64(b.numAddrsEjected)/float64(len(b.addrs))*100 >= float64(b.cfg.MaxEjectionPercent) {
+			channelz.Infof(logger, b.channelzParentID, "Success Rate Algorithm: MaxEjectionPercent already reached.")
 			return
 		}
 		successRate := float64(bucket.numSuccesses) / float64(bucket.numSuccesses+bucket.numFailures)
 		requiredSuccessRate := mean - stddev*(float64(ejectionCfg.StdevFactor)/1000)
+		channelz.Infof(logger, b.channelzParentID, "SuccessRate algorithm new interval data: %s. Parameters: successRate=%f, mean=%f, stddev=%f, requiredSuccessRate=%f", addrInfo, successRate, mean, stddev, requiredSuccessRate)
 		if successRate < requiredSuccessRate {
 			channelz.Infof(logger, b.channelzParentID, "SuccessRate algorithm detected outlier: %s. Parameters: successRate=%f, mean=%f, stddev=%f, requiredSuccessRate=%f", addrInfo, successRate, mean, stddev, requiredSuccessRate)
 			if uint32(grpcrand.Int31n(100)) < ejectionCfg.EnforcementPercentage {
 				b.ejectAddress(addrInfo)
 			}
+		} else {
+			channelz.Infof(logger, b.channelzParentID, "Success Rate Algorithm: no outlier detected.")
 		}
 	}
 }
