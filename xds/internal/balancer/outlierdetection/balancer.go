@@ -318,6 +318,8 @@ func (b *outlierDetectionBalancer) UpdateClientConnState(s balancer.ClientConnSt
 	}
 
 	if b.intervalTimer != nil {
+		currentTime := now().Sub(b.timerStartTime)
+		channelz.Infof(logger, b.channelzParentID, "UpdateClientConnState: stopping balancer at currentTime=%s", currentTime)
 		channelz.Infof(logger, b.channelzParentID, "UpdateClientConnState: stopping balancer intervalTimer.")
 		b.intervalTimer.Stop()
 	}
